@@ -1,0 +1,279 @@
+---
+title: 'Assignment 4: Elastic net and Multinomial Logistic'
+author: "Me_859!"
+date: "03 March 2021"
+output:
+  pdf_document: default
+  beamer_presentation:
+    includes:
+      in_header:
+      - header.tex
+      - columns.tex
+    keep_tex: yes
+---
+
+
+```{r, echo=FALSE, warning=FALSE, include=FALSE}
+#libraries
+library(glmnet)
+library(tidyverse)
+library(tidymodels)
+library(kableExtra)
+library(Matrix)
+```
+
+# 1 Penalized maximum likelihood
+
+```{r, echo=FALSE, include=FALSE}
+# inspect dataset: here we use the ess data about voting behavior for SD in sweden.
+getwd()
+ess2016 <- read.csv("ess2016se.csv")
+```
+
+The Swedish Democrats(Sverigedemokraterna), is a party formed in 1988. It won the parliament position in 2010 and witnessed a dramatic rise based oh his success in swedish 2014 elections. and now it is a popular party in Sweden with much support. But why this success over the last ten years?!. Studies show that this success was in line with the rise of immigration from developing countries to Europe and especially to Sweden with economic and cultural differences and the increase of unemployment. The Sweden Democrats believe that Swedish immigration and integration policies have been a national failure . Also their agenda describes the support to the welfare state and labour right and should be restricted only to the swedish citizens. Swedish people may feel that non-western immigrants threaten their economic wellbeing and their culture. these threats form negative attitudes towards immigrants and as a result increase the vote for the right party.
+
+So I suggest variables related to unemployment, income, safety, immigration as predictors of voting for the Sweden Democrats:  
+
+  - LKUEMP: HOW LIKELY UNEMPLOYED AND F2.0 LOOKING FOR WORK NEXT 12 MONTHS  
+  
+  - HINCSRCA: MAIN SOURCE OF HOUSEHOLD INCOME  
+  
+  - IMPSAFE: Important to live in secure and safe surroundings  
+  
+  - IMBGECO: Immigration bad or good for country's economy  
+  
+
+
+In order to fit a series of logistic regression models with a lasso penalty predicting the likelihood of voting for the Sweden Democrats, I created an x matrix of predictors and y vector of outcome ´votesd´ then I separated y from x and fitted a lasso regression using ´glmnet´ then I plot the coefficient paths as a function of lambda values as shown in (Figure 1). Figure 1 does not tell us alot about coefficients but it shows the path of these coefficients across lambda.  
+
+Then I used cross validation in combination with lasso regression to examine the predictive accuracy of the lasso penalized models of SD voting then I plotted the predictive accuracy as a function of lambda as in figure 2. It shows that the preferred model is somewhere between `6` and `22`covariates.  
+
+Then I extracted coefficients for the most parsimonious model that is within one standard error of the model with the minimum error as shown in Table1.  
+
+As shown in Table 1, we see the estimated coefficients within 1 standard error of minimum error where two covariates with lower odds to vote for SD like `imbgeco`that represent the status of immigration if it is bad or good for country's economy has 26 lower odds to vote for SD. this variable match my expectations mentioned first. Also variable `imueclt` that represent if the cultural life of the country is undermined or enriched by immigrants has 4.5 lower odds to vote for SD. the other two covariates are with higher odds to vote for SD like `gvrfgap` that asks if government should be generous judging application for refugees status, has 0.6 higher odds to vote for SD and covariate `rfgbfml` that asks if granted refugees should be entitled to bring close family members, has 11.4 higher odds to vote for SD. So we see that subject of covariates focused in this model is about immigration and its effects which match with my expectations mentions before but with different covariates. Only one covariate `imbgeco` matches.  
+
+
+I run an ordinary glm model using the same predictors used in the previous lasso model as shown in Table 2. we van notice how similar covariates in both model for their negative/ positive status but with different estimates/ results. but it still difficult to interpret them in the raw form, so we exponentiate the coefficients of model `exp(coef(lr))`, we see that `imbgeco`variable is 0.6 times higher odds of voting for SD, while `rfgbfml` variable is 1.6 times higher odds of voting for SD which is lower than odds in previous model.  
+
+
+
+
+
+
+
+
+```{r, echo=FALSE, include=FALSE}
+#we create an x matrix of predictors:
+x <- model.matrix(~. ,data=ess2016)
+cat("ess2016 original obs: ",nrow(ess2016),"\n",
+        "training data obs: ",nrow(x),sep="")
+
+# Separate y, from x
+y <- x[,"votesd"]
+# drop y from x. 
+x<-x[,-which(colnames(x)=="votesd")]
+#Fitting a lasso regression
+fitt_lasso <- glmnet(x,y,family="binomial",alpha= 1)
+```
+
+```{r,echo=FALSE, warning=FALSE,fig.height=6, fig.cap= "coefficient paths as a function of lambda values"}
+#plot
+plot(fitt_lasso,xvar="lambda")
+```
+
+
+```{r, echo=FALSE}
+cv_lasso <- cv.glmnet(x,y,family="binomial",alpha=1,nfolds=10)
+```
+
+```{r,echo=FALSE,warning=FALSE,fig.height=4, fig.cap="the predictive accuracy as a function of lambda"}
+plot(cv_lasso)
+```
+
+
+```{r, echo=FALSE, warning=FALSE}
+m_lasso_1se <- tidy(coef(cv_lasso,s="lambda.1se")) %>% 
+  rename(coef=value) %>% 
+  mutate(oddsrat=exp(coef)) %>% 
+  mutate(oddspct=100*(oddsrat-1))
+```
+
+```{r, echo=FALSE}
+kbl(m_lasso_1se, booktabs=T, linesep="", position="h", caption="Table1: Model with estimated coefficients within 1 standard error of minimum error") %>% 
+  kable_styling(latex_options = c("striped", "hold_position"), full_width = F)%>% 
+  row_spec(0,align="c")
+```
+
+
+
+```{r, echo=FALSE, warning=FALSE}
+library(stargazer)
+lr <- glm(y ~ imbgeco + imueclt + gvrfgap + rfgbfml , family = "binomial", data = ess2016)
+
+stargazer(lr,  header = FALSE,
+          title = "Table2: Ordinary glm model for coeffiecients",
+          notes = "Data from ESS 2016.", type = "text")
+```
+
+```{r, echo=FALSE}
+exp(coef(lr))
+```
+
+
+
+
+
+# 2 Multinomial Logit
+
+
+```{r, echo=FALSE,include=FALSE,warning=FALSE}
+#libraries
+library(nnet)
+library(broom)
+library(modelr)
+library(tidyverse)
+library(dplyr)
+library(foreign)
+library(haven)
+library(essurvey)
+```
+
+```{r, echo=FALSE, include=FALSE, warning=FALSE}
+library(essurvey)
+# set my e-mail address.
+set_email("samda859@student.liu.se")
+show_countries()
+show_country_rounds("United Kingdom")
+ess_uk <- import_country(
+    country = "United Kingdom",
+    rounds = 8
+    )
+```
+
+Based on studies, the voting behavior in the recent Brexit referendum reflects economic and demographic factors. for example the polls found that older voters were more likely to vote than younger ones as those older people were augmented by concerns related to health care and social security as they are the biggest recipients of these benefits. the majority of younger voters were women between 18-24, it may be related to their fears that they will be affect after Brexit, for example they may imagine that the women rights will be less protected   Also we see discrepancy in the education level where the majority with individuals whose education ended at secondary school or earlier voted to leave while majority of those with higher education voted to remain. also the migration issues including the inward migration from EU citizens and immigration from developing countries play a key role on voting to leave as they impact the economy, the pay levels and social security and causes pressure in public services such as schools and hospitals.
+
+In order to estimate the models, first I simplify the model by  changing variable `prtvtbgb` for party choice to factor and recoding it to values Conservative, Labour, Liberal Democrat, UK Independence Party, and others. 
+
+```{r, echo=FALSE, include=FALSE}
+#change it into factor
+# change some values to missing and make them explicit
+ess_uk <- recode_missings(ess_uk)
+
+ess_uk %>% 
+  mutate(prtvtbgb = as_factor(prtvtbgb),
+         prtvtbgb = na_if(prtvtbgb, "Not applicable"),
+         prtvtbgb = na_if(prtvtbgb, "Refusal"),
+         prtvtbgb = na_if(prtvtbgb, "Don't know"),
+         prtvtbgb = fct_explicit_na(prtvtbgb)) %>% 
+  count(prtvtbgb)
+
+# recode it:
+ess_uk <- ess_uk %>% 
+  mutate(gender = (gndr)) %>% 
+  mutate(age = (agea))%>% 
+  mutate(safe = (impsafe))%>% 
+mutate(education = as_factor(eisced),
+         education_level = fct_recode(education,
+                                        BA = "ES-ISCED V1, lower tertiary education, BA level",
+                                        master = "ES-ISCED V2, higher tertiary education, >= MA level", 
+                                        lower = "ES-ISCED IIIb, lower tier upper secondary",
+                                        lower = "ES-ISCED II, lower secondary",
+                                        lower = "ES-ISCED IV, advanced vocational, sub-degree",
+                                        lower = "ES-ISCED I , less than lower secondary",
+                                        lower = "ES-ISCED IIIa, upper tier upper secondary")) %>% 
+  mutate(party = as_factor(prtvtbgb),
+         party_bloc = fct_recode(party,
+                                 Conservative = "Conservative", 
+                                 Labour = "Labour",
+                                 LiberalDemocrat = "Liberal Democrat",
+                                 UKIndependenceParty = "UK Independence Party",
+                                 others = "Scottish National Party",
+                                 others = "Plaid Cymru",
+                                 others = "Green Party",
+                                 others = "Other",
+                                 others = "Ulster Unionist Party (nir)",
+                                 others = "Democratic Unionist Party (nir)",
+                                 others = "Sinn Féin (nir)",
+                                 others = "Social Democratic and Labour Party (nir)",
+                                 others = "Alliance Party (nir)",
+                                 others = "Traditional Unionist (nir)",
+                                 others = "Independent(s) (nir)",
+                                 others = "Other (nir)"))
+
+```
+
+
+Then I estimate two model, the first with `age`, `sex` and `eduniv` (`if the respondent has any university education`) and the second with the same variables in addition to variable `safe` (`respondent thinks it is important to live in safe and secure surroundings`) with `Labour` as reference category in both models as shown in Table3 and plotted in figure 3 where showed with different lines for each party choice, and separate graphs by gender _and_ education. In order to estimate the coefficients of variables in both model I use `tidy(model1)` _and_ `tidy(model2)` where we find for example females are more likely to vote to Labour party than to conservative and UKIndependenceParty while they are more likely to vote to LiberalDemocrat by 57% than to Labour. Also we see that individuals with higher education degree (MA) are more likely to vote to Liberal Democrat by 18% than Labour, while less likely to vote to Conservative by 25% than to Labour. also individuals with BA or MA degrees are less likely to vote to UKIndependenceParty than to Labour. Also we notice that older voters are less likley to vote to Labour than other parties.
+These estimate somehow match with my expectations in the level of age, education and gender.
+
+
+
+
+```{r, echo=FALSE, include=FALSE}
+# estimate models:
+model1 <- multinom(relevel(party_bloc, "Labour") ~ gender + age + education_level , data = ess_uk)
+
+model2 <- multinom(relevel(party_bloc, "Labour") ~ gender + age + education_level + safe, data = ess_uk)
+```
+
+
+```{r, echo=FALSE, warning=FALSE}
+# present estimated coefficients in a table
+library(stargazer)
+
+stargazer(model1, model2,  header = FALSE,
+          title = "Table 3: Party block choice in UK- Multinomial logistic regression",
+          notes = "Data from ESS 2016.", type = "text")
+```
+```{r, echo=FALSE, include=FALSE}
+tidy(model1)
+tidy(model2)
+```
+
+```{r, echo=FALSE, include=FALSE}
+data_predict <- tribble(
+  ~safe, ~gender, ~age, ~education_level,
+  "Like me", "Female", 30, "master",
+  "Not like me", "Male", 30, "BA",
+  "Very much like me", "Female",30,"lower")
+
+# Then predict using these data
+predict(model2, newdata = data_predict, "probs")
+```
+
+
+```{r, echo=FALSE, fig.cap= "Estimates from multinomial logistic regression"}
+# prediction data set
+predict_safe <- expand_grid(safe = c("Like me", "Somewhat like me", "Not like me", "Very much like me", "A little like me", "Not like me at all"), 
+                            gender = c("Male","Female"), 
+                            age = c(20, 80, 5), 
+                            education_level = c("master", "BA", "lower"))
+
+# to bind the predicted probabilities
+predict_safe <- predict(model2, newdata = predict_safe, "probs") %>% 
+  as_tibble() %>% 
+  bind_cols(predict_safe)
+
+
+predict_safe <- predict_safe %>% 
+  pivot_longer(cols = Conservative:UKIndependenceParty,
+               names_to = "party_bloc",
+               values_to = "prediction")
+
+ggplot(predict_safe, 
+       aes(safe,prediction, color = party_bloc)) +
+  geom_line(size = 0.6) +
+  facet_wrap(~ gender + education_level) +
+  labs(title = "Party bloc choices in the 
+       UK 2016 ",
+       subtitle = "Estimates from multinomial 
+       logistic regression",
+       y = "Predicted vote probability",
+       x = "safe and secure surroundings scale",
+       color = "Party_bloc",
+       caption = "Data from ESS 2016.")+
+  scale_x_discrete(breaks=seq(0,10,5))
+```
+
+
+
